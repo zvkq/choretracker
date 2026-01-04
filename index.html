@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chore Tracker</title>
+  <script src="/_sdk/data_sdk.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      box-sizing: border-box;
+    }
+    
+    @keyframes bounce-in {
+      0% { transform: scale(0.8); opacity: 0; }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    
+    .bounce-in {
+      animation: bounce-in 0.4s ease-out;
+    }
+    
+    @keyframes slide-up {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    
+    .slide-up {
+      animation: slide-up 0.3s ease-out;
+    }
+    
+    .toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #10b981;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 600;
+      z-index: 1000;
+      animation: slide-up 0.3s ease-out;
+    }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+ </head>
+ <body class="h-full">
+  <div id="app" class="h-full w-full"></div>
+  <script>
+    const defaultConfig = {
+      background_color: "#fef3c7",
+      card_color: "#ffffff",
+      text_color: "#1f2937",
+      primary_button_color: "#8b5cf6",
+      secondary_button_color: "#ec4899",
+      font_family: "system-ui",
+      font_size: 16,
+      app_title: "💰 Chore Tracker",
+      earned_text: "You've earned",
+      send_button_text: "📱 Send to Parents",
+      mark_paid_text: "✅ Mark as Paid"
+    };
+
+    const choreTemplates = [
+      { name: "Make bed", amount: 1 },
+      { name: "Take out trash", amount: 2 },
+      { name: "Help with dinner", amount: 2 },
+      { name: "Clean art/toy room", amount: 3 },
+      { name: "Fold and put away laundry", amount: 3 },
+      { name: "Set table", amount: 1 },
+      { name: "Empty dishwasher", amount: 2 },
+      { name: "Vacuum living room", amount: 3 },
+      { name: "Feed pet", amount: 1 },
+      { name: "Mow lawn", amount: 5 },
+      { name: "Wash car", amount: 5 },
+      { name: "Organize closet", amount: 3 },
+      { name: "Do homework without asking", amount: 1 },
+      { name: "Rake leaves", amount: 4 },
+      { name: "Sweep floors", amount: 2 },
+      { name: "Wash dishes and or put in dishwasher", amount: 3 },
+      { name: "Start laundry", amount: 1 }
+    ];
+
+    let allChores = [];
+    let currentView = 'current';
+
+    function getWeekNumber(date) {
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+      const yearStart = new Date(d.getFullYear(), 0, 1);
+      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    }
+
+    function getCurrentWeek() {
+      const now = new Date();
+      return {
+        week: getWeekNumber(now),
+        year: now.getFullYear()
+      };
+    }
+
+    function showToast(message) {
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    async function addChore(name, amount) {
+      if (allChores.length >= 999) {
+        showToast("⚠️ Maximum limit of 999 chores reached!");
+        return;
+      }
+
+      const addButton = event.target;
+      addButton.disabled = true;
+      addButton.textContent = "Adding...";
+
+      const { week, year } = getCurrentWeek();
+      const result = await window.dataSdk.create({
+        id: `chore_${Date.now()}_${Math.random()}`,
+        chore_name: name,
+        amount: amount,
+        completed_at: new Date().toISOString(),
+        week_number: week,
+        year: year,
+        is_paid: false
+      });
+
+      if (result.isOk) {
+        showToast(`🎉 Added: ${name}`);
+      } else {
+        showToast("❌ Failed to add chore");
+        addButton.disabled = false;
+        addButton.textContent = "Add";
+      }
+    }
+
+    async function deleteChore(chore) {
+      const result = await window.dataSdk.delete(chore);
+      if (result.isOk) {
+        showToast("🗑️ Chore removed");
+      } else {
+        showToast("❌ Failed to delete chore");
+      }
+    }
+
+    async function markAsPaid() {
+      const button = event.target;
+      button.disabled = true;
+      button.textContent = "Marking...";
+
+      const currentWeekChores = getCurrentWeekChores();
+      let successCount = 0;
+
+      for (const chore of currentWeekChores) {
+        const result = await window.dataSdk.update({
+          ...chore,
+          is_paid: true
+        });
+        if (result.isOk) successCount++;
+      }
+
+      if (successCount === currentWeekChores.length) {
+        showToast(`💵 ${currentWeekChores.length} chores marked as paid!`);
+      } else {
+        showToast("❌ Some chores failed to update");
+      }
+
+      button.disabled = false;
+      button.textContent = window.elementSdk?.config?.mark_paid_text || defaultConfig.mark_paid_text;
+    }
+
+    function getCurrentWeekChores() {
+      const { week, year } = getCurrentWeek();
+      return allChores.filter(c => c.week_number === week && c.year === year && !c.is_paid);
+    }
+
+    function getPastWeeksData() {
+      const { week: currentWeek, year: currentYear } = getCurrentWeek();
+      const pastChores = allChores.filter(c => {
+        if (c.year < currentYear) return true;
+        if (c.year === currentYear && c.week_number < currentWeek) return true;
+        if (c.year === currentYear && c.week_number === currentWeek && c.is_paid) return true;
+        return false;
+      });
+
+      const weekGroups = {};
+      pastChores.forEach(chore => {
+        const key = `${chore.year}-W${chore.week_number}`;
+        if (!weekGroups[key]) {
+          weekGroups[key] = { chores: [], total: 0 };
+        }
+        weekGroups[key].chores.push(chore);
+        weekGroups[key].total += chore.amount;
+      });
+
+      return Object.entries(weekGroups)
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .slice(0, 10);
+    }
+
+    function generateParentMessage() {
+      const currentChores = getCurrentWeekChores();
+      const total = currentChores.reduce((sum, c) => sum + c.amount, 0);
+      
+      const choresByDate = {};
+      currentChores.forEach(chore => {
+        const date = new Date(chore.completed_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        if (!choresByDate[date]) {
+          choresByDate[date] = [];
+        }
+        choresByDate[date].push(chore);
+      });
+      
+      let breakdown = '';
+      Object.entries(choresByDate).forEach(([date, chores]) => {
+        breakdown += `${date}:\n`;
+        chores.forEach(c => {
+          breakdown += ` • ${c.chore_name} - $${c.amount.toFixed(2)}\n`;
+        });
+        breakdown += '\n';
+      });
+      
+      const message = `Hi Mom & Dad! 👋\n\nYou owe me $${total.toFixed(2)} for ${currentChores.length} completed chore${currentChores.length !== 1 ? 's' : ''} this week.\n\n📋 BREAKDOWN:\n\n${breakdown}💰 TOTAL OWED: $${total.toFixed(2)}\n\nThanks! 😊`;
+      
+      showMessageModal(message);
+    }
+
+    function showMessageModal(message) {
+      const config = window.elementSdk?.config || defaultConfig;
+      const baseSize = config.font_size || defaultConfig.font_size;
+      
+      const modal = document.createElement('div');
+      modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+        padding: 16px;
+        box-sizing: border-box;
+      `;
+      
+      modal.innerHTML = `
+        <div style="background: ${config.card_color}; border-radius: 20px; padding: 24px; max-width: 500px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.3); max-height: 90%; overflow-y: auto;">
+          <h2 style="font-size: ${baseSize * 1.5}px; font-weight: 800; margin-bottom: 16px; color: ${config.text_color};">📧 Send to Parents</h2>
+          <p style="font-size: ${baseSize * 0.9}px; color: ${config.text_color}; opacity: 0.8; margin-bottom: 16px;">Copy this message and paste it into Gmail to send to your parents!</p>
+          <textarea id="message-text" readonly style="width: 100%; height: 300px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 12px; font-size: ${baseSize * 0.9}px; font-family: monospace; resize: none; box-sizing: border-box; color: ${config.text_color}; background: ${config.background_color};">${message}</textarea>
+          <div style="display: flex; gap: 12px; margin-top: 16px;">
+            <button id="copy-btn" style="flex: 1; background: ${config.primary_button_color}; color: white; padding: 14px; border: none; border-radius: 12px; font-weight: 700; font-size: ${baseSize * 0.9}px; cursor: pointer;">📋 Copy Message</button>
+            <button id="close-modal-btn" style="flex: 1; background: ${config.secondary_button_color}; color: white; padding: 14px; border: none; border-radius: 12px; font-weight: 700; font-size: ${baseSize * 0.9}px; cursor: pointer;">Close</button>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(modal);
+      
+      document.getElementById('copy-btn').addEventListener('click', () => {
+        const textarea = document.getElementById('message-text');
+        textarea.select();
+        textarea.setSelectionRange(0, 99999); // For mobile devices
+        
+        // Try modern clipboard API first
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(message).then(() => {
+            const copyBtn = document.getElementById('copy-btn');
+            copyBtn.textContent = '✅ Copied!';
+            setTimeout(() => {
+              copyBtn.textContent = '📋 Copy Message';
+            }, 2000);
+          }).catch(() => {
+            // Fallback to older method
+            document.execCommand('copy');
+            const copyBtn = document.getElementById('copy-btn');
+            copyBtn.textContent = '✅ Copied!';
+            setTimeout(() => {
+              copyBtn.textContent = '📋 Copy Message';
+            }, 2000);
+          });
+        } else {
+          // Fallback for older browsers
+          document.execCommand('copy');
+          const copyBtn = document.getElementById('copy-btn');
+          copyBtn.textContent = '✅ Copied!';
+          setTimeout(() => {
+            copyBtn.textContent = '📋 Copy Message';
+          }, 2000);
+        }
+      });
+      
+      document.getElementById('close-modal-btn').addEventListener('click', () => {
+        modal.remove();
+      });
+      
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.remove();
+        }
+      });
+    }
+
+    function onConfigChange(config) {
+      const customFont = config.font_family || defaultConfig.font_family;
+      const baseSize = config.font_size || defaultConfig.font_size;
+      const baseFontStack = 'system-ui, -apple-system, sans-serif';
+
+      document.body.style.fontFamily = `${customFont}, ${baseFontStack}`;
+      document.body.style.fontSize = `${baseSize}px`;
+
+      const app = document.getElementById('app');
+      app.style.background = config.background_color || defaultConfig.background_color;
+
+      const title = document.getElementById('app-title');
+      if (title) {
+        title.textContent = config.app_title || defaultConfig.app_title;
+        title.style.color = config.text_color || defaultConfig.text_color;
+        title.style.fontSize = `${baseSize * 1.75}px`;
+      }
+
+      const earnedText = document.getElementById('earned-text');
+      if (earnedText) {
+        earnedText.textContent = config.earned_text || defaultConfig.earned_text;
+        earnedText.style.color = config.text_color || defaultConfig.text_color;
+        earnedText.style.fontSize = `${baseSize * 1.25}px`;
+      }
+
+      const totalAmount = document.getElementById('total-amount');
+      if (totalAmount) {
+        totalAmount.style.color = config.primary_button_color || defaultConfig.primary_button_color;
+        totalAmount.style.fontSize = `${baseSize * 2.5}px`;
+      }
+
+      document.querySelectorAll('.card').forEach(card => {
+        card.style.background = config.card_color || defaultConfig.card_color;
+      });
+
+      document.querySelectorAll('.text-color').forEach(el => {
+        el.style.color = config.text_color || defaultConfig.text_color;
+      });
+
+      document.querySelectorAll('.primary-btn').forEach(btn => {
+        btn.style.background = config.primary_button_color || defaultConfig.primary_button_color;
+        btn.style.fontSize = `${baseSize * 0.9}px`;
+      });
+
+      document.querySelectorAll('.secondary-btn').forEach(btn => {
+        btn.style.background = config.secondary_button_color || defaultConfig.secondary_button_color;
+        btn.style.fontSize = `${baseSize * 0.9}px`;
+      });
+
+      document.querySelectorAll('.template-btn').forEach(btn => {
+        btn.style.fontSize = `${baseSize * 0.85}px`;
+      });
+
+      document.querySelectorAll('input, textarea').forEach(input => {
+        input.style.fontSize = `${baseSize}px`;
+      });
+
+      const sendBtn = document.getElementById('send-btn');
+      if (sendBtn) {
+        sendBtn.textContent = config.send_button_text || defaultConfig.send_button_text;
+      }
+
+      const paidBtn = document.getElementById('paid-btn');
+      if (paidBtn) {
+        paidBtn.textContent = config.mark_paid_text || defaultConfig.mark_paid_text;
+      }
+    }
+
+    function renderApp() {
+      const config = window.elementSdk?.config || defaultConfig;
+      const currentChores = getCurrentWeekChores();
+      const total = currentChores.reduce((sum, c) => sum + c.amount, 0);
+      const pastWeeks = getPastWeeksData();
+
+      const app = document.getElementById('app');
+      
+      if (app.children.length === 0) {
+        app.innerHTML = `
+          <div class="w-full h-full overflow-auto" style="background: ${config.background_color}; padding: 16px;">
+            <div style="max-width: 600px; margin: 0 auto;">
+              <h1 id="app-title" style="font-size: ${config.font_size * 1.75}px; font-weight: 800; text-align: center; margin-bottom: 24px; color: ${config.text_color};">${config.app_title}</h1>
+              
+              <div class="card bounce-in" style="background: ${config.card_color}; border-radius: 20px; padding: 24px; margin-bottom: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div id="earned-text" style="font-size: ${config.font_size * 1.25}px; font-weight: 600; text-align: center; color: ${config.text_color}; margin-bottom: 8px;">${config.earned_text}</div>
+                <div id="total-amount" style="font-size: ${config.font_size * 2.5}px; font-weight: 800; text-align: center; color: ${config.primary_button_color};">$${total.toFixed(2)}</div>
+                <div style="text-align: center; color: ${config.text_color}; margin-top: 8px; opacity: 0.7; font-size: ${config.font_size * 0.9}px;">${currentChores.length} chore${currentChores.length !== 1 ? 's' : ''} this week</div>
+              </div>
+
+              <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+                <button id="current-tab" class="primary-btn" style="flex: 1; background: ${config.primary_button_color}; color: white; padding: 12px; border: none; border-radius: 12px; font-weight: 700; font-size: ${config.font_size * 0.9}px; cursor: pointer;">Current Week</button>
+                <button id="history-tab" class="secondary-btn" style="flex: 1; background: ${config.secondary_button_color}; color: white; padding: 12px; border: none; border-radius: 12px; font-weight: 700; font-size: ${config.font_size * 0.9}px; cursor: pointer;">History</button>
+              </div>
+
+              <div id="content-area"></div>
+            </div>
+          </div>
+        `;
+
+        document.getElementById('current-tab').addEventListener('click', () => {
+          currentView = 'current';
+          updateView();
+        });
+
+        document.getElementById('history-tab').addEventListener('click', () => {
+          currentView = 'history';
+          updateView();
+        });
+      } else {
+        document.getElementById('total-amount').textContent = `$${total.toFixed(2)}`;
+        document.querySelector('#total-amount').nextElementSibling.textContent = `${currentChores.length} chore${currentChores.length !== 1 ? 's' : ''} this week`;
+      }
+
+      updateView();
+    }
+
+    function updateView() {
+      const config = window.elementSdk?.config || defaultConfig;
+      const contentArea = document.getElementById('content-area');
+      const currentChores = getCurrentWeekChores();
+      const pastWeeks = getPastWeeksData();
+
+      document.getElementById('current-tab').style.opacity = currentView === 'current' ? '1' : '0.6';
+      document.getElementById('history-tab').style.opacity = currentView === 'history' ? '1' : '0.6';
+
+      if (currentView === 'current') {
+        contentArea.innerHTML = `
+          <div class="card slide-up" style="background: ${config.card_color}; border-radius: 20px; padding: 20px; margin-bottom: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 class="text-color" style="font-size: ${config.font_size * 1.25}px; font-weight: 700; margin-bottom: 16px; color: ${config.text_color};">✨ Quick Add Chores</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px;" id="template-container"></div>
+          </div>
+
+          <div class="card slide-up" style="background: ${config.card_color}; border-radius: 20px; padding: 20px; margin-bottom: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 class="text-color" style="font-size: ${config.font_size * 1.25}px; font-weight: 700; margin-bottom: 16px; color: ${config.text_color};">🎨 Custom Chore</h2>
+            <input type="text" id="custom-chore" placeholder="What chore did you do?" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 12px; margin-bottom: 12px; font-size: ${config.font_size}px; box-sizing: border-box;">
+            <input type="number" id="custom-amount" placeholder="Worth ($)" value="2" min="0" step="0.5" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 12px; margin-bottom: 12px; font-size: ${config.font_size}px; box-sizing: border-box;">
+            <button id="add-custom" class="primary-btn" style="width: 100%; background: ${config.primary_button_color}; color: white; padding: 14px; border: none; border-radius: 12px; font-weight: 700; font-size: ${config.font_size * 0.9}px; cursor: pointer;">Add Custom Chore</button>
+          </div>
+
+          <div class="card slide-up" style="background: ${config.card_color}; border-radius: 20px; padding: 20px; margin-bottom: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 class="text-color" style="font-size: ${config.font_size * 1.25}px; font-weight: 700; margin-bottom: 16px; color: ${config.text_color};">📝 This Week's Chores</h2>
+            <div id="chores-list"></div>
+          </div>
+
+          <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+            <button id="send-btn" class="primary-btn" style="flex: 1; background: ${config.primary_button_color}; color: white; padding: 16px; border: none; border-radius: 16px; font-weight: 700; font-size: ${config.font_size * 0.9}px; cursor: pointer;">${config.send_button_text}</button>
+            <button id="paid-btn" class="secondary-btn" style="flex: 1; background: ${config.secondary_button_color}; color: white; padding: 16px; border: none; border-radius: 16px; font-weight: 700; font-size: ${config.font_size * 0.9}px; cursor: pointer;">${config.mark_paid_text}</button>
+          </div>
+        `;
+
+        const templateContainer = document.getElementById('template-container');
+        choreTemplates.forEach(template => {
+          const btn = document.createElement('button');
+          btn.className = 'template-btn';
+          btn.style.cssText = `background: ${config.primary_button_color}; color: white; padding: 12px 8px; border: none; border-radius: 12px; font-weight: 600; font-size: ${config.font_size * 0.85}px; cursor: pointer; text-align: center;`;
+          btn.innerHTML = `${template.name}<br><span style="font-size: ${config.font_size * 0.75}px; opacity: 0.9;">$${template.amount}</span>`;
+          btn.addEventListener('click', () => addChore(template.name, template.amount));
+          templateContainer.appendChild(btn);
+        });
+
+        document.getElementById('add-custom').addEventListener('click', () => {
+          const name = document.getElementById('custom-chore').value.trim();
+          const amount = parseFloat(document.getElementById('custom-amount').value) || 2;
+          if (name) {
+            addChore(name, amount);
+            document.getElementById('custom-chore').value = '';
+            document.getElementById('custom-amount').value = '2';
+          } else {
+            showToast("⚠️ Please enter a chore name");
+          }
+        });
+
+        document.getElementById('send-btn').addEventListener('click', generateParentMessage);
+        document.getElementById('paid-btn').addEventListener('click', markAsPaid);
+
+        updateChoresList();
+      } else {
+        contentArea.innerHTML = `
+          <div class="card slide-up" style="background: ${config.card_color}; border-radius: 20px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 class="text-color" style="font-size: ${config.font_size * 1.25}px; font-weight: 700; margin-bottom: 16px; color: ${config.text_color};">📅 Past Weeks</h2>
+            <div id="history-list"></div>
+          </div>
+        `;
+
+        const historyList = document.getElementById('history-list');
+        if (pastWeeks.length === 0) {
+          historyList.innerHTML = `<div class="text-color" style="text-align: center; padding: 32px; opacity: 0.6; color: ${config.text_color}; font-size: ${config.font_size}px;">No history yet. Complete some chores! 🎯</div>`;
+        } else {
+          pastWeeks.forEach(([weekKey, data]) => {
+            const weekDiv = document.createElement('div');
+            weekDiv.style.cssText = `border-bottom: 1px solid #e5e7eb; padding: 16px 0;`;
+            weekDiv.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div class="text-color" style="font-weight: 700; font-size: ${config.font_size * 1.1}px; color: ${config.text_color};">${weekKey}</div>
+                <div style="font-weight: 800; font-size: ${config.font_size * 1.25}px; color: ${config.primary_button_color};">$${data.total.toFixed(2)}</div>
+              </div>
+              <div class="text-color" style="opacity: 0.7; font-size: ${config.font_size * 0.9}px; color: ${config.text_color};">${data.chores.length} chore${data.chores.length !== 1 ? 's' : ''} completed</div>
+              <details style="margin-top: 8px;">
+                <summary class="text-color" style="cursor: pointer; opacity: 0.8; font-size: ${config.font_size * 0.85}px; color: ${config.text_color};">View chores</summary>
+                <ul style="margin-top: 8px; padding-left: 20px;">
+                  ${data.chores.map(c => `<li class="text-color" style="opacity: 0.7; font-size: ${config.font_size * 0.85}px; margin-top: 4px; color: ${config.text_color};">${c.chore_name} - $${c.amount.toFixed(2)}</li>`).join('')}
+                </ul>
+              </details>
+            `;
+            historyList.appendChild(weekDiv);
+          });
+        }
+      }
+    }
+
+    function updateChoresList() {
+      const config = window.elementSdk?.config || defaultConfig;
+      const currentChores = getCurrentWeekChores();
+      const choresList = document.getElementById('chores-list');
+      
+      if (!choresList) return;
+
+      if (currentChores.length === 0) {
+        choresList.innerHTML = `<div class="text-color" style="text-align: center; padding: 32px; opacity: 0.6; color: ${config.text_color}; font-size: ${config.font_size}px;">No chores yet! Add some above 👆</div>`;
+      } else {
+        choresList.innerHTML = currentChores.map(chore => `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: ${config.background_color}; border-radius: 12px; margin-bottom: 8px;">
+            <div class="text-color" style="flex: 1; font-weight: 600; font-size: ${config.font_size}px; color: ${config.text_color};">${chore.chore_name}</div>
+            <div style="font-weight: 800; font-size: ${config.font_size * 1.1}px; color: ${config.primary_button_color}; margin-right: 12px;">$${chore.amount.toFixed(2)}</div>
+            <button onclick="deleteChore(allChores.find(c => c.__backendId === '${chore.__backendId}'))" style="background: #ef4444; color: white; border: none; border-radius: 8px; padding: 6px 12px; font-weight: 600; cursor: pointer; font-size: ${config.font_size * 0.85}px;">🗑️</button>
+          </div>
+        `).join('');
+      }
+    }
+
+    window.deleteChore = deleteChore;
+
+    const dataHandler = {
+      onDataChanged(data) {
+        allChores = data;
+        renderApp();
+      }
+    };
+
+    async function init() {
+      const dataResult = await window.dataSdk.init(dataHandler);
+      if (!dataResult.isOk) {
+        console.error("Failed to initialize data SDK");
+      }
+
+      if (window.elementSdk) {
+        window.elementSdk.init({
+          defaultConfig,
+          onConfigChange,
+          mapToCapabilities: (config) => ({
+            recolorables: [
+              {
+                get: () => config.background_color || defaultConfig.background_color,
+                set: (value) => {
+                  config.background_color = value;
+                  window.elementSdk.setConfig({ background_color: value });
+                }
+              },
+              {
+                get: () => config.card_color || defaultConfig.card_color,
+                set: (value) => {
+                  config.card_color = value;
+                  window.elementSdk.setConfig({ card_color: value });
+                }
+              },
+              {
+                get: () => config.text_color || defaultConfig.text_color,
+                set: (value) => {
+                  config.text_color = value;
+                  window.elementSdk.setConfig({ text_color: value });
+                }
+              },
+              {
+                get: () => config.primary_button_color || defaultConfig.primary_button_color,
+                set: (value) => {
+                  config.primary_button_color = value;
+                  window.elementSdk.setConfig({ primary_button_color: value });
+                }
+              },
+              {
+                get: () => config.secondary_button_color || defaultConfig.secondary_button_color,
+                set: (value) => {
+                  config.secondary_button_color = value;
+                  window.elementSdk.setConfig({ secondary_button_color: value });
+                }
+              }
+            ],
+            borderables: [],
+            fontEditable: {
+              get: () => config.font_family || defaultConfig.font_family,
+              set: (value) => {
+                config.font_family = value;
+                window.elementSdk.setConfig({ font_family: value });
+              }
+            },
+            fontSizeable: {
+              get: () => config.font_size || defaultConfig.font_size,
+              set: (value) => {
+                config.font_size = value;
+                window.elementSdk.setConfig({ font_size: value });
+              }
+            }
+          }),
+          mapToEditPanelValues: (config) => new Map([
+            ["app_title", config.app_title || defaultConfig.app_title],
+            ["earned_text", config.earned_text || defaultConfig.earned_text],
+            ["send_button_text", config.send_button_text || defaultConfig.send_button_text],
+            ["mark_paid_text", config.mark_paid_text || defaultConfig.mark_paid_text]
+          ])
+        });
+      }
+
+      renderApp();
+    }
+
+    init();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9b874e8226d24615',t:'MTc2NzQ5Mzc1MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
