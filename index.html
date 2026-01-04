@@ -4,9 +4,99 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chore Tracker</title>
-  <script src="/_sdk/data_sdk.js"></script>
-  <script src="/_sdk/element_sdk.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Standalone localStorage-based data SDK
+    window.dataSdk = {
+      STORAGE_KEY: 'choretracker_data',
+      handler: null,
+      
+      loadData() {
+        try {
+          const data = localStorage.getItem(this.STORAGE_KEY);
+          return data ? JSON.parse(data) : [];
+        } catch (e) {
+          console.error('Failed to load data:', e);
+          return [];
+        }
+      },
+      
+      saveData(data) {
+        try {
+          localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
+          return true;
+        } catch (e) {
+          console.error('Failed to save data:', e);
+          return false;
+        }
+      },
+      
+      async init(handler) {
+        this.handler = handler;
+        const data = this.loadData();
+        if (handler && handler.onDataChanged) {
+          handler.onDataChanged(data);
+        }
+        return { isOk: true };
+      },
+      
+      async create(item) {
+        const data = this.loadData();
+        item.__backendId = item.id || `chore_${Date.now()}_${Math.random()}`;
+        data.push(item);
+        const success = this.saveData(data);
+        if (success && this.handler && this.handler.onDataChanged) {
+          this.handler.onDataChanged(data);
+        }
+        return { isOk: success };
+      },
+      
+      async update(item) {
+        const data = this.loadData();
+        const index = data.findIndex(d => d.__backendId === item.__backendId);
+        if (index !== -1) {
+          data[index] = item;
+          const success = this.saveData(data);
+          if (success && this.handler && this.handler.onDataChanged) {
+            this.handler.onDataChanged(data);
+          }
+          return { isOk: success };
+        }
+        return { isOk: false };
+      },
+      
+      async delete(item) {
+        const data = this.loadData();
+        const filtered = data.filter(d => d.__backendId !== item.__backendId);
+        const success = this.saveData(filtered);
+        if (success && this.handler && this.handler.onDataChanged) {
+          this.handler.onDataChanged(filtered);
+        }
+        return { isOk: success };
+      }
+    };
+
+    // Standalone element SDK (config management)
+    window.elementSdk = {
+      config: null,
+      onConfigChange: null,
+      
+      init(options) {
+        this.config = { ...options.defaultConfig };
+        this.onConfigChange = options.onConfigChange;
+        if (this.onConfigChange) {
+          this.onConfigChange(this.config);
+        }
+      },
+      
+      setConfig(newConfig) {
+        this.config = { ...this.config, ...newConfig };
+        if (this.onConfigChange) {
+          this.onConfigChange(this.config);
+        }
+      }
+    };
+  </script>
   <style>
     body {
       box-sizing: border-box;
@@ -626,5 +716,5 @@
 
     init();
   </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9b874e8226d24615',t:'MTc2NzQ5Mzc1MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ </body>
 </html>
